@@ -1,0 +1,1 @@
+The RFC is OK, but for the next steps, show how the system gathers candidate perspectives, checks for one-sided or sycophantic framing, and communicates uncertainty rather than presenting a judgment as fact.
