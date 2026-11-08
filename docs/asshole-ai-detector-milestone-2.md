@@ -190,16 +190,16 @@ Retrieval is evaluated in two separate stages: the development set is used for a
 
 Stage 1: Development set (tuning).
 
-* Retrieval relevance: two annotators independently label the top-5 retrieved cases for 50 development stories as relevant, partially relevant or not relevant. We report Precision@5, percentage agreement and Cohen’s kappa.
-* Threshold tuning: these labels adjust the reranker threshold (initially 0.5). On consensus and disputed development stories, we also check whether the neighbor verdict distribution matches the reference label and whether retrieval_disagreement and disputed_share are higher on disputed stories. This sets the disagreement threshold.
-Both thresholds are then frozen together with m_low, m_high and t_info.
+* Retrieval relevance: two annotators independently label the top-5 cases for 50 development stories as relevant, partially relevant or not relevant. Precision@5 counts only relevant cases, and a lenient variant also counts partially relevant ones. We report percentage agreement and Cohen’s kappa.
+* Verdict agreement: computed on consensus stories only, as a match between the top class of the neighbor verdict distribution and the reference label. Disputed and insufficient-information stories have null reference labels and are excluded.
+* Disagreement signal: we check whether retrieval_disagreement and disputed_share are higher on disputed stories than on consensus stories.
+* Tuning: the relevance labels adjust the reranker threshold (initially 0.5), and the disagreement analysis sets the disagreement threshold. Both are then frozen with m_low, m_high and t_info.
 
 Stage 2: Golden Dataset (final evaluation, run once).
 
-The frozen configuration is run on the Golden Dataset with no adjustments. Verdict agreement and the disagreement analysis are computed on all stories, and Precision@5 with annotator agreement is reported on the 20–30 hand-scored stories (Section 4.5).
-Weaknesses found here are reported as limitations, not used for tuning.
-
-End-to-end value is judged by the project-level metrics already defined in Section 4.5 (RAG-enhanced vs Baseline, YTA affirmation rate).
+* The frozen configuration is run without adjustments. Verdict agreement uses consensus stories only, and the disagreement analysis covers all stories.
+* Relevance of the top-5 cases is annotated for the 20–30 hand-scored stories (Section 4.5), with the same metrics as in Stage 1. This is a separate annotation pass, not part of the Section 4.5 human evaluation metrics.
+* Weaknesses are reported as limitations, not used for tuning.
 
 ## 4. Agent & Tools
 
