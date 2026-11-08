@@ -186,10 +186,18 @@ All heavy operations happen offline, and the online path is deterministic and ch
 
 #### **3.9 RAG evaluation**
 
-Two measures, both on the golden set:
+Retrieval is evaluated in two separate stages: the development set is used for all tuning, and the Golden Dataset is used only once, after all retrieval parameters are frozen.
 
-* Retrieval relevance: two annotators label the top-5 cases for 50 development stories as relevant, partially relevant or not relevant. We report precision@5, percentage agreement and Cohen’s kappa. These labels set the reranker threshold (initial value 0.5).  
-* Verdict agreement and disagreement: on consensus development cases, whether the top class of the neighbor distribution matches the reference label. On disputed development cases, whether retrieval\_disagreement and disputed\_share are higher than on consensus cases. This sets the retrieval-disagreement threshold.
+Stage 1: Development set (tuning).
+
+* Retrieval relevance: two annotators independently label the top-5 retrieved cases for 50 development stories as relevant, partially relevant or not relevant. We report Precision@5, percentage agreement and Cohen’s kappa.
+* Threshold tuning: these labels adjust the reranker threshold (initially 0.5). On consensus and disputed development stories, we also check whether the neighbor verdict distribution matches the reference label and whether retrieval_disagreement and disputed_share are higher on disputed stories. This sets the disagreement threshold.
+Both thresholds are then frozen together with m_low, m_high and t_info.
+
+Stage 2: Golden Dataset (final evaluation, run once).
+
+The frozen configuration is run on the Golden Dataset with no adjustments. Verdict agreement and the disagreement analysis are computed on all stories, and Precision@5 with annotator agreement is reported on the 20–30 hand-scored stories (Section 4.5).
+Weaknesses found here are reported as limitations, not used for tuning.
 
 End-to-end value is judged by the project-level metrics already defined in Section 4.5 (RAG-enhanced vs Baseline, YTA affirmation rate).
 
