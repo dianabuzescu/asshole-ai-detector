@@ -112,73 +112,84 @@ The Golden Dataset will remain separate from training and RAG retrieval data. Ev
 
 Community judgments will be treated as reference labels rather than absolute moral ground truth. The finalized dataset, selection criteria and annotations will be preserved to ensure experimental reproducibility.
 
-## 3. RAG Design
+## **3. RAG Design**
 
-### 3.1 Role of RAG in the system
+### **3.1 Role of RAG in the system**
 
-Retrieval gives the agent **precedents**: resolved AITA cases with their community verdicts and arguments. It never produces the verdict. The classifier does that(RoBERTa, Section 5), and retrieval supplies (1) evidence, (2) arguments against the narrator, and (3) a measure of how divided similar cases were.
+Retrieval gives the agent **precedents**: resolved AITA cases with their community verdicts and arguments. It never produces the verdict. The classifier does that(RoBERTa, Section 5), and retrieval supplies (1) evidence, (2) arguments against the narrator, and (3) a measure of how divided similar cases were. 
 
-### 3.2 Index content and data preparation
+#### **3.2 Index content and data preparation**
 
-- **Source:** Reddit AITA Submissions and Comments Multiclass (Section 1.2).
-- **Comment filtering:** remove deleted/removed comments and comments labelled null. Only NTA, YTA, ESH and NAH count as valid verdicts.
-- **Post filtering:** keep posts with at least 5 valid comments (same threshold as the Golden Dataset, Section 2.2). Remove deleted/removed posts and posts under 50 words.
-- **Post label:** majority verdict among valid comments. If agreement is at least 70%, the post is labelled with that class (NTA, YTA, ESH or NAH). Otherwise it is labelled DISPUTED. Each post also stores its full verdict distribution.
-- **Derived fields per post:**
-  - verdict_distribution: share of each verdict among the valid comments.
-  - top_verdict: the plurality verdict. Ties are broken by the verdict of the lowest-numbered (highest-ranked) tied comment.
-  - consensus_label: top_verdict if its share is at least 0.70, otherwise DISPUTED (same 70% threshold as the Golden Dataset).
-  - n_valid: number of valid comments.
-- **Index size:** Group posts by top_verdict. Each group keeps at most 5,000 posts: all DISPUTED posts of the group first, then consensus posts chosen at random. The index has at most 20,000 posts. Sampling is random.
-- **Stored payload per post:** post_id, title, text, url, date, the derived fields, the valid comments as (rank, verdict, text), and ambiguity_score stored as provider_ambiguity (diagnostic only, never used in logic. Rationale: on the rows we inspected it is 0 for unanimous posts and grows with disagreement, but it is not the entropy of the 10 labels (a 3/3/3 split scores 0.277 and a 3/2/2/2 split scores 0.679). Building logic on an unknown formula would be a risk, and our own consensus_label is transparent).
-- **Leakage control:** golden-set posts are removed from the index by ID and by near-duplicate check (cosine similarity ≥ 0.95 between golden-set and index embeddings).
+* **Source:** Reddit AITA Submissions and Comments Multiclass (Section 1.2).  
+* **Splits:** before the index is built, the Golden Dataset (Section 2\) and the development set (Section 4.5) are drawn from the dataset with a fixed seed and removed from the pool. The index is built only from the remaining posts. If a class is too small to cover all three uses, priority is: Golden Dataset, development set, index.   
+* **Comment filtering:** remove deleted/removed comments and comments labelled null. Only NTA, YTA, ESH and NAH count as valid verdicts.  
+* **Post filtering:** keep posts with at least 5 valid comments (same threshold as the Golden Dataset, Section 2.2). Remove deleted/removed posts and posts under 50 words.  
+* **Post label:** majority verdict among valid comments. If agreement is at least 70%, the post is labelled with that class (NTA, YTA, ESH or NAH). Otherwise it is labelled DISPUTED. Each post also stores its full verdict distribution.  
+* **Derived fields per post:**  
+  * verdict\_distribution: share of each verdict among the valid comments.  
+  * top\_verdict: the plurality verdict. Ties are broken by the verdict of the lowest-numbered (highest-ranked) tied comment.  
+  * consensus\_label: top\_verdict if its share is at least 0.70, otherwise DISPUTED (same 70% threshold as the Golden Dataset).  
+  * n\_valid: number of valid comments.  
+* **Index size:** Group posts by top\_verdict. Each group keeps at most 5,000 posts: all DISPUTED posts of the group first, then consensus posts chosen at random. The index has at most 20,000 posts. Sampling is random.   
+* **Stored payload per post:** post\_id, title, text, URL, date, the derived fields, the valid comments as (comment\_id, rank, verdict, text) with comment\_id \= post\_id\#rank, and ambiguity\_score stored as provider\_ambiguity  (diagnostic only, never used in logic. Rationale: on the rows we inspected it is 0 for unanimous posts and grows with disagreement, but it is not the entropy of the 10 labels (a 3/3/3 split scores 0.277 and a 3/2/2/2 split scores 0.679). Building logic on an unknown formula would be a risk, and our own consensus\_label is transparent).  
+* **Leakage control:** golden-set posts are removed from the index by ID and by near-duplicate check (cosine similarity ≥ 0.95 between golden-set and index embeddings).
 
-### 3.3 Chunking strategy
+#### **3.3 Chunking strategy**
 
-AITA posts are narratives, so cutting them at arbitrary points can separate cause from consequence. Comments are short and self-contained. We therefore chunk the two differently.
+#### One post \= one vector. The embedded text is title \+ "\\n" \+ text. A safety cap of 1,024 tokens (first 700 and last 324 tokens) applies. Comments are not chunked or embedded; they are stored in the post payload and fetched by post\_id after a post is selected.
 
-| Content  | Strategy                                                                                      | Rationale                                                     |
-| -------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Comments | One chunk per comment, with metadata (*`verdict`*, *`score`*, *`post_id`*)                    | Comments are short and already argument-sized                 |
-| Posts    | One chunk for short posts, recursive chunks for longer posts (\~300–400 tokens, \~50 overlap) | Length varies widely, and embedding models have token limits  |
+#### Rationale: An AITA post is one narrative where cause and consequence must stay together, and the retrieval unit is a case, not a passage. One vector per post removes chunk merging and score pooling, and it keeps the index small. Comments are never searched, so embedding them would multiply indexing cost for no retrieval benefit. The dataset has no per-comment score, so rank is the only popularity signal available. The 1,024-token cap is a safety limit for future sources with longer posts, and we will confirm the maximum post length of this dataset during preprocessing.
 
-### 3.4 Embedding model
+#### **3.4 Embedding model**
 
-Qwen3-Embedding-0.6B, 1024 dimensions, L2-normalized, cosine similarity. Queries use the instruction prefix Instruct: Given a description of an interpersonal conflict, retrieve similar conflicts\nQuery: ...; documents use no prefix. It is the only embedding model in the system.
+Embedding: Qwen3-Embedding-0.6B, 1024 dimensions, L2-normalized, cosine similarity. Queries use the prefix Instruct: Given a description of an interpersonal conflict, retrieve similar conflicts\\nQuery: ...; documents use no prefix. It is the only embedding model in the system, and it is also used for the duplicate checks in 3.7.
 
-### 3.5 Vector database
+Vector database: ChromaDB, persistent local client, one collection with cosine distance. Metadata fields: post\_id, top\_verdict, consensus\_label. The index folder is versioned together with a manifest (embedding model, filter thresholds, sampling seed, caps, build date).
 
-**ChromaDB, persistent local client**, one collection with cosine distance. Metadata fields: `post_id`, `top_verdict`, `consensus_label`. The index folder is versioned together with a manifest (embedding model name, filter thresholds, sampling seed, caps, build date).
+The model is instruction-aware and accepts long inputs, so titles and posts never need chunking. A single model means a single index to build and keep consistent. ChromaDB needs no server, runs in Colab and in the local stdio MCP server, supports metadata filtering and stores payloads. At up to 20,000 vectors exact search is fast, so a more complex database adds no value.
 
-### 3.5 Retrieval pipeline (retrieve_similar_cases)
+#### **3.5 Retrieval pipeline (retrieve\_similar\_cases)**
 
-1. **Query: **the output of neutralize_narrative, lowercased and truncated.
-2. **Dense search: **top-30 posts from ChromaDB.
-3. **Rerank: **Qwen3-Reranker-0.6B scores each (query, post) pair with a relevance probability in [0, 1], using the instruction “Given a description of an interpersonal conflict, judge whether the candidate describes a similar conflict”. Keep the top-15.
-4. **Neighbor verdict distribution: **the average of the verdict_distribution of the top-15 posts, weighted by reranker score. disputed_share is the fraction of the top-15 with consensus_label = DISPUTED.
-5. **Evidence selection (verdict-balanced): **from the top-15, take the highest-scoring post of each top_verdict class present (up to 4), then fill to 5 cases with the highest-scoring unused posts.
-6. **Retrieval confidence:** the mean reranker score of the top-5 posts.
-7. **Retry rule:** if the best reranker score is below the threshold (0.5), the agent reformulates the query once as one sentence (relationship, trigger, action) and repeats steps 2–6. If the score is still below the threshold, the result is returned with its low retrieval_confidence, and the agent treats retrieval as weak evidence.
+1. **Query:** the output of neutralize\_narrative, lowercased and truncated to 1,024 tokens.  
+2. **Dense search:** top-30 posts from ChromaDB.  
+3. **Rerank:** Qwen3-Reranker-0.6B scores each (query, post) pair with a relevance probability in \[0, 1\], using the instruction “Given a description of an interpersonal conflict, judge whether the candidate describes a similar conflict”. Keep the top-15.  
+4. **Neighbor verdict distribution:** the average of verdict\_distribution over the top-15 posts, weighted by reranker score. It covers NTA, YTA, ESH and NAH only; INFO is handled by the classifier. disputed\_share is the fraction of the top-15 with consensus\_label \= DISPUTED.  
+5. **Retrieval disagreement:** the normalized Shannon entropy of the neighbor verdict distribution (0 \= all weight on one class, 1 \= uniform over the four classes). This is the retrieval-disagreement signal used by the “Split” tier in Section 4.2, together with disputed\_share. Its threshold is a development-set parameter, tuned and frozen together with m\_low, m\_high and t\_info.  
+6. **Evidence selection (verdict-balanced):** from the top-15, take the highest-scoring post of each top\_verdict class present (up to 4), then fill to 5 cases with the highest-scoring unused posts. For each case, include up to 3 comments (the highest-ranked comment of each distinct verdict, at most 60 words each) with their comment\_id.  
+7. **Retrieval confidence:** the mean reranker score of the top-5 posts.  
+8. **Retry rule:** if the best reranker score is below the threshold (initially 0.5), the query is rebuilt once from a deterministic template filled with the relationship, trigger and actions returned by neutralize\_narrative, with no additional LLM call, and steps 2–7 are repeated. If the score is still below the threshold, the result is returned with its low retrieval\_confidence, and the agent treats retrieval as weak evidence.
 
-### 3.6 Ingestion of new data
+#### **3.6 Ingestion of new data**
 
 Ingestion is an offline, idempotent script (ingest.py), not an MCP tool (keeping ingestion out of the agent’s toolset prevents index changes at inference time). It accepts a source name and a path, and it processes every record through the same pipeline:
 
-1. Adapter: maps the source’s fields to the schema in 3.2 (title, text, URL, date, labelled comments). Supporting a new source means writing one adapter and nothing else.
-2. Clean: links and mentions removed, lowercase.
-3. Derive verdicts: keep only valid comments, compute verdict_distribution, top_verdict and consensus_label with the thresholds in the config. Records with fewer than 5 valid comments or fewer than 50 words are rejected.
-4. Assign post_id: the Reddit ID for Reddit sources, a content hash otherwise.
-5. Deduplicate: reject records whose post_id is already in the index or in the golden set, and records whose embedding has cosine similarity ≥ 0.95 with an existing index or golden-set vector.
-6. Enforce class caps: reject records whose top_verdict class already holds 5,000 posts.
-7. Embed and upsert: embed with the model named in the manifest and write the vector and payload to ChromaDB.
+1. Adapter: maps the source’s fields to the schema in 3.2 (title, text, URL, date, labelled comments). Supporting a new source means writing one adapter and nothing else.  
+2. Clean: links and mentions removed, lowercase.  
+3. Derive verdicts: keep only valid comments, compute verdict\_distribution, top\_verdict and consensus\_label with the thresholds in the config. Records with fewer than 5 valid comments or fewer than 50 words are rejected.  
+4. Assign post\_id: the Reddit ID for Reddit sources, a content hash otherwise.  
+5. Deduplicate: reject records whose post\_id is already in the index, in the Golden Dataset or in the development set, and records whose Qwen3-Embedding vector has cosine similarity ≥ 0.95 with an existing index, Golden or development vector. Reformulated and user-submitted stories are never ingested. The 0.95 value is an initial threshold, validated on 20 duplicate pairs (a development post and a lightly edited copy) and 20 non-duplicate pairs (a development post and its nearest different post), and adjusted if a duplicate is missed or a non-duplicate is flagged.   
+6. Enforce class caps: reject records whose top\_verdict class already holds 5,000 posts.  
+7. Embed and upsert: embed with the model named in the manifest and write the vector and payload to ChromaDB.  
 8. Update manifest and report: the manifest (model, thresholds, seed, per-class counts, date) is rewritten, and a report lists accepted records and rejections by reason.
 
-### 3.9 RAG evaluation
+**3.7 Vector database**
+
+**ChromaDB, persistent local client**, one collection with cosine distance. Metadata fields: `post_id`, `top_verdict`, `consensus_label`. The index folder is versioned together with a manifest (embedding model name, filter thresholds, sampling seed, caps, build date).
+
+#### **3.8 Cost and latency**
+
+* Embedding and reranker weights are \~1.2 GB each in fp16, so both fit next to the generator and the classifier on a T4.  
+* Per story, retrieval costs one query embedding, one search and 30 reranker pairs, with no generative LLM call. The planned budget for the tool is a few seconds, to be measured in the early latency check (Weeks 8–9).  
+* Indexing 20,000 posts is a one-off cost, estimated at under an hour on a T4 (to be confirmed), and is rerun only when the manifest configuration changes.
+
+All heavy operations happen offline, and the online path is deterministic and cheap, which protects the \~30 s end-to-end target of Section 4.1.
+
+#### **3.9 RAG evaluation**
 
 Two measures, both on the golden set:
 
-- Retrieval relevance: two annotators label the top-5 cases for 50 golden stories as relevant, partially relevant or not relevant. We report precision@5 and annotator agreement. The same labels recalibrate the reranker threshold.
-- Verdict agreement: on consensus golden cases, whether the top class of the neighbor distribution matches the golden label. On disputed golden cases, whether disputed_share and the spread of the distribution are higher than on consensus cases.
+* Retrieval relevance: two annotators label the top-5 cases for 50 development stories as relevant, partially relevant or not relevant. We report precision@5, percentage agreement and Cohen’s kappa. These labels set the reranker threshold (initial value 0.5).  
+* Verdict agreement and disagreement: on consensus development cases, whether the top class of the neighbor distribution matches the reference label. On disputed development cases, whether retrieval\_disagreement and disputed\_share are higher than on consensus cases. This sets the retrieval-disagreement threshold.
 
 End-to-end value is judged by the project-level metrics already defined in Section 4.5 (RAG-enhanced vs Baseline, YTA affirmation rate).
 
