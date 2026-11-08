@@ -8,16 +8,14 @@ The Asshole AI Detector project aims to develop an AI-powered system that provid
 
 The main problem addressed is sycophancy, the tendency of LLMs to excessively agree with users, even when their behaviour may be problematic. The issue is amplified by the subjective and one-sided nature of conflict narratives, which may omit important information or present events in the narrator’s favor.
 
-Given a user’s description of a conflict, the system will provide a reasoned assessment that considers alternative perspectives and uncertainty in the available information.
-
 Given a conflict description, the system will produce a structured assessment containing:
 
-- Verdict: NTA, YTA, ESH or NAH
-- Explanation: Reasoning supporting the assessment
+- Verdict: NTA, YTA, ESH, NAH or null when the verdict is withheld.
+- Explanation: Reasoning supporting the assessment.
 - Alternative perspectives: Plausible interpretations from the involved parties
-- Uncertainty assessment: Missing information, limitations and uncertainty level
+- Uncertainty assessment: Presentation tier (Withhold, Split, Leaning or Confident), missing information and relevant limitations.
 
-When information is insufficient, the agent may request clarification or withhold the verdict (null). INFO is not a final verdict, ensuring compatibility with the four-class classifier.
+The classifier will predict five classes (NTA, YTA, ESH, NAH and INFO). However, INFO will only serve as an internal clarification signal, not as a final verdict. When sufficient information is unavailable, the agent may request clarification or return a null verdict.
 
 The objective is to reduce bias and unjustified agreement with the narrator.
 
@@ -34,19 +32,17 @@ Relevant data includes:
 - Submission title and text: conflict descriptions from the narrator’s perspective
 - Top comments: opinions and arguments that may provide alternative interpretations
 - Comment classifications: NTA, YTA, ESH, NAH and INFO labels
-- Ambiguity score: a score calculated from the standard deviation of numerically encoded comment labels, weighted by their mean and normalized to a 0-1 scale. It emphasizes disagreement between YTA and NTA.
+- Ambiguity score: a score calculated from the standard deviation of numerically encoded comment labels, weighted by their mean and normalized to a 0-1 scale. It emphasizes disagreement between YTA and NTA rather than measuring all types of disagreement equally. We will retain it for descriptive analysis but will not use it for filtering or as an evaluation target.
 
-These data will support system development and evaluation. Additionally, the academic Scruples dataset may be considered as a supplementary source of moral judgments.
+The Scruples dataset will additionally be used to train the RoBERTa verdict classifier.
 
-A key limitation is that community verdicts reflect subjective opinions rather than objective moral truths. Therefore, these labels will be treated as evaluation references, not definitive evidence of moral responsibility.
+Community judgments reflect subjective opinions rather than objective moral truths and will therefore be treated as reference labels.
 
 ## 2. Golden Dataset
 
 ### 2.1 Purpose
 
-The Golden Dataset will serve as a reference set for reliable and reproducible system evaluation. It will contain manually reviewed AITA conflicts, including cases where community judgments are divided.
-
-Its purpose is to assess whether the system can recognize the narrator’s responsibility without automatically validating their behaviour and identify situations where the available information does not support a confident verdict.
+The Golden Dataset will serve as a manually validated reference set for reproducible evaluation. It will include both clear-consensus and ambiguous AITA cases to assess verdict reliability, sycophancy and appropriate uncertainty handling.
 
 ### 2.2. Dataset Construction
 
@@ -58,29 +54,57 @@ We propose selecting 200 examples from the AITA dataset, organized as follows:
 | YTA(You’re the Asshole)     | 40                 |
 | ESH(Everyone sucks here)    | 40                 |
 | NAH(No Assholes Here)       | 40                 |
-| Ambiguous or disputed cases | 40                 |
+| Community disagreement      | 20                 |
+| Insufficient information    | 20                 |
 
-Selection will prioritize diverse scenarios and exclude duplicate cases.
+For clear-consensus cases, the reference verdict must receive at least 70% agreement among a minimum of five validly classified comments.
 
-To establish baseline reference verdicts for clear-consensus instances, we require a minimum of five validly classified comments per story, with at least 70% demonstrating agreement. Conversely, cases failing to meet this consensus threshold will be isolated to evaluate how effectively the system manages uncertainty.
+Agreement will be calculated from all available NTA, YTA, ESH and NAH classifications, up to ten comments per submission. INFO classifications will be recorded separately as potential indicators of missing context.
+
+The two ambiguous categories are defined separately:
+
+- Community disagreement: At least five valid moral verdicts, with no single verdict reaching 70% agreement.
+ - Insufficient information: Cases manually identified as lacking essential context for a justified assessment, regardless of community agreement.
+
+Cases classified as having insufficient information will be excluded from other categories to avoid overlap. Disputed and insufficient-information cases will have a null reference verdict rather than an artificially assigned consensus label.
+
+The balanced selection is intended for comparative evaluation and does not represent the natural distribution of AITA verdicts.
 
 ### 2.3. Manual Validation & Annotation
 
-Each selected example will be independently reviewed by two team members using consistent annotation guidelines:
+Each example will be independently reviewed by two team members using predefined annotation guidelines. Disagreements will be resolved through discussion and documented.
 
-- Reference label validity and community agreement.
-- Relevant facts and missing information.
-- Plausible alternative perspectives.
-- Potentially biased or narrator-favoring framing.
-- Need for uncertainty or clarification.
+Inter-annotator agreement will be measured using percentage agreement and Cohen's Kappa before resolving disagreements, ensuring that the reported metrics reflect independent annotations.
 
-Annotator disagreements will be discussed and documented. Cases without a defensible consensus will not be assigned an artificially certain verdict.
+Annotations will be stored in a structured JSON format containing:
+
+| Field                       |Type/Allowed values |
+| --------------------------- | ------------------ |
+| case_id                     | Unique identifier  |
+| narrative                   | Original conflict text|
+| community_votes             | Counts for NTA, YTA, ESH, NAH, INFO|
+| community_agreement         |Float between 0 and 1|
+| reference_verdict           | NTA, YTA, ESH, NAH or null|
+| case_type                   |consensus, disputed, missing_context|
+| key_facts                   | List of relevant facts|
+| missing_information         | List of missing details|
+| alternative_perspectives    | List of plausible interpretations|
+| framing_bias                | none, possible, clear |
+| annotator_verdicts          | Two annotations: NTA, YTA, ESH, NAH or UNDETERMINED |
+| annotation_notes            | Explanation of decisions and disagreements|
+| expected_uncertainty_tier   | withhold, split, leaning, confident |
+| expected_initial_action     | `proceed` or `request_clarification` |
+
+
+The four-class reference verdict will be used only when sufficiently supported. Cases marked as disputed or insufficiently specified may have a null reference verdict and will primarily support uncertainty evaluation.
 
 ### 2.4. Consistency Testing
 
-For approximately 20 cases, we will create additional neutral reformulations or alternative-perspective versions while preserving the relevant facts.
+For 20 clear-consensus scenarios selected from the Golden Dataset, we will evaluate three versions: the original narrative, a neutral reformulation and a role-swapped reformulation.
 
-These versions will be manually checked to ensure that the transformations do not introduce unsupported information. They will allow us to examine judgment consistency and identify verdict changes caused by narrative framing.
+This produces 60 evaluation texts. All versions will be manually checked to preserve the relevant facts and evaluated using identical model configurations.
+
+For role-swapped versions, verdicts will be mapped back to the original narrator's responsibility before comparison. All versions will be excluded from the RAG index to prevent data leakage.
 
 ### 2.5. Evaluation Integrity
 
