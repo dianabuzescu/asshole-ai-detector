@@ -499,10 +499,11 @@ All models run on Google Colab , with Kaggle as backup. Shared code lives in `.p
 | **Comparison SLMs**    | **Gemma 3 4B**, **Llama 3.2 3B**                | Evaluates whether training family affects social sycophancy at the 4B parameter scale.                                                                   |
 | **Verdict classifier** | **RoBERTa-base**, fine-tuned on Scruples labels | Used in earlier AITA work ; outputs probabilities we can calibrate; trains on a T4 in under an hour                                                      |
 | **Embeddings**         | **bge-base-en-v1.5**, **all-MiniLM-L6-v2**      | Dual evaluation: MiniLM serves as an ultra-fast local baseline; BGE-base provides high-fidelity semantic precedent retrieval                             |
-| **API baseline**       | Gemini 1.5 Flash or GPT-4o-mini)                | Plainly prompted zero-shot baseline representing consumer chatbot behavior on the golden evaluation set.                                                 |
+| **API baseline**       | Gemini 3.8 Flash or GPT-4o-mini)                | Plainly prompted zero-shot baseline representing consumer chatbot behavior on the golden evaluation set.                                                 |
 | **Baseline SLM ** | Qwen2.5-1.5B-Instruct                           | Demonstrates the performance and sycophancy penalty of ultra-small models versus 3B–4B architectures.                                                    |
 
-**Selection rule:** we pick the SLM with the lowest affirmation rate on YTA-labeled golden-set cases, provided its verdict accuracy is not below the baseline's and its latency stays within about 30 s per story. Qwen3-4B stays the default unless another model clearly beats it.
+**Selection rule:** We choose the SLM with the lowest sycophancy rate on YTA posts in the dev set. Its accuracy must not be worse than the baseline's, and its typical (median) time per story must stay under about 30 seconds.Qwen3-4B stays unless another model is clearly better. The chosen model is tested once on the golden set. We time a rough version of the pipeline on about 20 stories per model. If it is too slow, we try in order: 4-bit quantization, shorter outputs, merged calls, parallel steps, a smaller model for the framing check, and finally removing a step. 
+
 
 **Limitations:** small models can be inconsistent (we request JSON output and retry on failure), and RoBERTa truncates posts beyond 512 tokens.
 
